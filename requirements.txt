@@ -1,0 +1,18 @@
+# ===== Backend (FastAPI) uchun =====
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+python-docx==1.1.2
+pypdf==4.3.1
+
+# ===== Ikkala bot uchun umumiy =====
+python-dotenv==1.0.1
+aiogram==3.13.1
+aiohttp==3.10.10
+
+# ===== AI xizmatlari =====
+groq==1.7.0
+google-genai==1.20.0
+
+# ===== Ma'lumotlar bazasi (Supabase/Postgres) =====
+asyncpg==0.31.0
