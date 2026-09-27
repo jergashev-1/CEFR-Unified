@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: cefr-writing-bot
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: DONATE_CARD_NUMBER
+        sync: false
+      - key: DONATE_CARD_HOLDER
+        sync: false
