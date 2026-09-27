@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CEFR Multilevel Test</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --ink:#1C2541;
+    --ink-soft:#4A5372;
+    --accent:#3D6657;
+    --accent-soft:#E4ECE8;
+    --gold:#C9A66B;
+    --line:#DAD6C9;
+    --danger:#B4442E;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{
+    max-width:640px;
+    margin:0 auto;
+    padding:20px 18px 60px;
+    min-height:100vh;
+  }
+  header.top{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:1px solid var(--line);
+    padding-bottom:14px;
+    margin-bottom:22px;
+  }
+  header.top .eyebrow{
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  header.top h1{
+    font-family:'Source Serif 4',serif;
+    font-size:22px;
+    font-weight:700;
+    margin:2px 0 0;
+  }
+  .tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:24px;
+  }
+  .tab{
+    flex:1;
+    text-align:center;
+    padding:10px 8px;
+    border-radius:10px;
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink-soft);
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+    transition:all .15s ease;
+  }
+  .tab.active{
+    background:var(--ink);
+    border-color:var(--ink);
+    color:var(--paper);
+  }
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px;
+    margin-bottom:16px;
+  }
+  .card .label{
+    font-size:11px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:700;
+    margin-bottom:6px;
+  }
+  .card h2{
+    font-family:'Source Serif 4',serif;
+    font-size:19px;
+    margin:0 0 10px;
+  }
+  .card p.prompt{
+    font-size:15px;
+    line-height:1.55;
+    color:var(--ink);
+    background:var(--accent-soft);
+    padding:12px 14px;
+    border-radius:10px;
+    border-left:3px solid var(--accent);
+  }
+
+  .task-picker{
+    display:flex;
+    gap:8px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .task-pill{
+    padding:8px 14px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:#fff;
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .task-pill.active{
+    background:var(--gold);
+    border-color:var(--gold);
+    color:var(--ink);
+  }
+
+  textarea{
+    width:100%;
+    min-height:180px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px;
+    font-family:'Inter',sans-serif;
+    font-size:14.5px;
+    line-height:1.5;
+    resize:vertical;
+    margin-top:12px;
+  }
+  .wordcount{
+    text-align:right;
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:4px;
+  }
+
+  .divider-or{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin:16px 0;
+    color:var(--ink-soft);
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+  }
+  .divider-or::before,.divider-or::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+
+  .file-drop{
+    border:1.5px dashed var(--line);
+    border-radius:10px;
+    padding:16px;
+    text-align:center;
+    color:var(--ink-soft);
+    font-size:13.5px;
+    cursor:pointer;
+    background:#FCFBF8;
+  }
+  .file-drop.has-file{
+    border-color:var(--accent);
+    color:var(--accent);
+    background:var(--accent-soft);
+  }
+  input[type=file]{display:none;}
+
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    width:100%;
+    padding:13px 16px;
+    border-radius:10px;
+    border:none;
+    font-weight:700;
+    font-size:15px;
+    cursor:pointer;
+    margin-top:14px;
+    transition:opacity .15s;
+  }
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-primary{background:var(--ink);color:var(--paper);}
+  .btn-record{background:var(--danger);color:#fff;}
+  .btn-record.recording{animation:pulse 1.4s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(180,68,46,.5);}
+    70%{box-shadow:0 0 0 10px rgba(180,68,46,0);}
+    100%{box-shadow:0 0 0 0 rgba(180,68,46,0);}
+  }
+  .timer{
+    text-align:center;
+    font-family:'Source Serif 4',serif;
+    font-size:26px;
+    margin:10px 0 0;
+    color:var(--ink-soft);
+  }
+
+  .result{
+    margin-top:18px;
+    padding:18px;
+    border-radius:var(--radius);
+    background:var(--ink);
+    color:var(--paper);
+  }
+  .result .level{
+    font-family:'Source Serif 4',serif;
+    font-size:44px;
+    font-weight:700;
+    color:var(--gold);
+    line-height:1;
+  }
+  .result .level-label{
+    font-size:11px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    opacity:.7;
+  }
+  .result .feedback{
+    margin-top:10px;
+    font-size:14px;
+    line-height:1.5;
+    opacity:.92;
+  }
+  .status-msg{
+    text-align:center;
+    font-size:13px;
+    color:var(--ink-soft);
+    margin-top:10px;
+  }
+  .part-picker{
+    display:flex;
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .part-picker .task-pill{flex:1;text-align:center;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div>
+      <div class="eyebrow">CEFR Multilevel Test</div>
+      <h1>Baholash platformasi</h1>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="speaking">🎙 Speaking</button>
+    <button class="tab" data-tab="writing">✍️ Writing</button>
+  </div>
+
+  <!-- ==================== SPEAKING ==================== -->
+  <div class="panel active" id="panel-speaking">
+    <div class="card">
+      <div class="label">Speaking qismi</div>
+      <div class="part-picker" id="speakingParts">
+        <div class="task-pill active" data-part="1.1">Part 1.1</div>
+        <div class="task-pill" data-part="1.2">Part 1.2</div>
+        <div class="task-pill" data-part="2">Part 2</div>
+        <div class="task-pill" data-part="3">Part 3</div>
+      </div>
+      <p class="prompt" id="speakingPrompt">Savolni matn ko'rinishida yozing, YOKI rasm (screenshot) sifatida yuklang — avtomatik o'qib olamiz.</p>
+
+      <textarea id="questionText" placeholder="Savol matnini shu yerga yozing (ixtiyoriy, lekin tavsiya etiladi)..." style="min-height:80px;"></textarea>
+
+      <div class="divider-or">yoki savolni rasmdan o'qish</div>
+      <label class="file-drop" id="questionImageLabel">
+        🖼 Savol rasmini (screenshot) tanlash
+        <input type="file" id="questionImageInput" accept="image/*">
+      </label>
+      <div class="status-msg" id="questionImageStatus"></div>
+
+      <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:16px;">
+        <div class="label" style="margin-bottom:10px;">Ovozli javobingiz</div>
+      </div>
+
+      <button class="btn btn-record" id="recordBtn">● Yozishni boshlash</button>
+      <div class="timer" id="recordTimer" style="display:none;">00:00</div>
+
+      <div class="divider-or">yoki</div>
+
+      <label class="file-drop" id="audioDropLabel">
+        📁 Tayyor audio faylni tanlash (.mp3, .ogg, .m4a, .wav)
+        <input type="file" id="audioFileInput" accept="audio/*">
+      </label>
+
+      <button class="btn btn-primary" id="submitSpeakingBtn" disabled>Yuborish va baholash</button>
+      <div class="status-msg" id="speakingStatus"></div>
+      <div id="speakingResult"></div>
+    </div>
+  </div>
+
+  <!-- ==================== WRITING ==================== -->
+  <div class="panel" id="panel-writing">
+    <div class="card">
+      <div class="label">Writing qismi</div>
+      <div class="task-picker" id="writingTasks">
+        <div class="task-pill active" data-task="1.1">Task 1.1</div>
+        <div class="task-pill" data-task="1.2">Task 1.2</div>
+        <div class="task-pill" data-task="2">Essay / Blog post</div>
+      </div>
+
+      <h2 id="writingTaskTitle">Task 1.1</h2>
+      <p class="prompt" id="writingPrompt">Yuklanmoqda...</p>
+      <button class="btn" id="regenerateBtn" style="background:var(--gold);color:var(--ink);margin-top:0;">🔄 Yangi mavzu olish</button>
+
+      <textarea id="writingText" placeholder="Javobingizni shu yerga yozing..."></textarea>
+      <div class="wordcount" id="wordCount">0 so'z</div>
+
+      <div class="divider-or">yoki tayyor faylni yuklang</div>
+
+      <label class="file-drop" id="writingDropLabel">
+        📁 Fayl tanlash (.docx, .pdf, .txt)
+        <input type="file" id="writingFileInput" accept=".docx,.pdf,.txt">
+      </label>
+
+      <button class="btn btn-primary" id="submitWritingBtn">Yuborish va baholash</button>
+      <div class="status-msg" id="writingStatus"></div>
+      <div id="writingResult"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// SOZLAMA: backend manzilingizni shu yerga qo'ying
+// ============================================================
+const API_BASE = "https://cefr-backend-qf9n.onrender.com";
+
+// Telegram foydalanuvchi ID sini olish (agar Telegram ichida ochilsa)
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+const userId = tg?.initDataUnsafe?.user?.id?.toString() || "guest_" + Math.random().toString(36).slice(2, 8);
+
+// ---------- TABS ----------
+function activateTab(tabName){
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const btn = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  const panel = document.getElementById('panel-' + tabName);
+  if (btn && panel) {
+    btn.classList.add('active');
+    panel.classList.add('active');
+  }
+}
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+
+// Bot qaysi tugmasidan ochilgani asosida to'g'ri bo'limni ko'rsatish
+// Speaking bot -> ...netlify.app/?tab=speaking
+// Writing bot  -> ...netlify.app/?tab=writing
+const urlParams = new URLSearchParams(window.location.search);
+const requestedTab = urlParams.get('tab');
+if (requestedTab === 'speaking' || requestedTab === 'writing') {
+  activateTab(requestedTab);
+}
+
+// ============================================================
+// SPEAKING
+// ============================================================
+let mediaRecorder, recordedChunks = [], recordedBlob = null, uploadedAudioFile = null;
+let recordSeconds = 0, timerInterval = null;
+
+document.querySelectorAll('#speakingParts .task-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('#speakingParts .task-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    resetSpeaking();
+  });
+});
+
+function resetSpeaking(){
+  recordedBlob = null;
+  uploadedAudioFile = null;
+  document.getElementById('audioFileInput').value = "";
+  document.getElementById('audioDropLabel').classList.remove('has-file');
+  document.getElementById('audioDropLabel').textContent = "📁 Tayyor audio faylni tanlash (.mp3, .ogg, .m4a, .wav)";
+  document.getElementById('submitSpeakingBtn').disabled = true;
+  document.getElementById('speakingResult').innerHTML = "";
+  document.getElementById('speakingStatus').textContent = "";
+}
+
+// ---- Savol rasmini yuklash va o'qish ----
+document.getElementById('questionImageInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const label = document.getElementById('questionImageLabel');
+  const statusEl = document.getElementById('questionImageStatus');
+  label.classList.add('has-file');
+  label.textContent = "✅ " + file.name;
+  statusEl.textContent = "⏳ Rasm o'qilmoqda...";
+
+  const formData = new FormData();
+  formData.append('image', file);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/extract-question-image`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error("Server xatosi: " + res.status);
+    const data = await res.json();
+    const qEl = document.getElementById('questionText');
+    qEl.value = (qEl.value ? qEl.value + "\n\n" : "") + data.extracted_text;
+    statusEl.textContent = "✅ Rasm o'qildi, matn pastga qo'shildi (tekshirib chiqing)";
+  } catch (err) {
+    statusEl.textContent = "❌ Xatolik: " + err.message;
+  }
+});
+
+document.getElementById('recordBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('recordBtn');
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        recordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+        uploadedAudioFile = null;
+        document.getElementById('submitSpeakingBtn').disabled = false;
+        document.getElementById('speakingStatus').textContent = "Yozib olindi ✅ (" + recordSeconds + " soniya)";
+      };
+      mediaRecorder.start();
+      btn.textContent = "■ Tugatish";
+      btn.classList.add('recording');
+      recordSeconds = 0;
+      document.getElementById('recordTimer').style.display = 'block';
+      timerInterval = setInterval(() => {
+        recordSeconds++;
+        const m = String(Math.floor(recordSeconds/60)).padStart(2,'0');
+        const s = String(recordSeconds%60).padStart(2,'0');
+        document.getElementById('recordTimer').textContent = `${m}:${s}`;
+      }, 1000);
+    } catch (err) {
+      alert("Mikrofonga ruxsat berilmadi: " + err.message);
+    }
+  } else {
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    btn.textContent = "● Qayta yozish";
+    btn.classList.remove('recording');
+    clearInterval(timerInterval);
+  }
+});
+
+document.getElementById('audioFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  uploadedAudioFile = file;
+  recordedBlob = null;
+  document.getElementById('audioDropLabel').classList.add('has-file');
+  document.getElementById('audioDropLabel').textContent = "✅ " + file.name;
+  document.getElementById('submitSpeakingBtn').disabled = false;
+});
+
+document.getElementById('submitSpeakingBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('submitSpeakingBtn');
+  const statusEl = document.getElementById('speakingStatus');
+  const part = document.querySelector('#speakingParts .task-pill.active').dataset.part;
+  const questionText = document.getElementById('questionText').value.trim();
+
+  const audioToSend = uploadedAudioFile || (recordedBlob ? new File([recordedBlob], "recording.webm", {type:"audio/webm"}) : null);
+  if (!audioToSend) { alert("Avval audio yozing yoki fayl tanlang"); return; }
+
+  btn.disabled = true;
+  statusEl.textContent = "Yuborilmoqda va baholanmoqda... (audio uzunligiga qarab 10-40 soniya vaqt olishi mumkin)";
+  document.getElementById('speakingResult').innerHTML = "";
+
+  const formData = new FormData();
+  formData.append('audio', audioToSend);
+  formData.append('user_id', userId);
+  formData.append('part', part);
+  formData.append('question_text', questionText);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/submit-speaking`, { method: 'POST', body: formData });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || ("Server xatosi: " + res.status));
+    }
+    const data = await res.json();
+    renderSpeakingResult(data);
+    statusEl.textContent = "";
+  } catch (err) {
+    statusEl.textContent = "❌ Xatolik: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderSpeakingResult(data){
+  document.getElementById('speakingResult').innerHTML = `
+    <div class="result">
+      <div class="level-label">${data.part_label || ''}</div>
+      <div class="feedback" style="white-space:pre-wrap; font-size:14px; margin-top:8px;">${escapeHtml(data.report || '')}</div>
+      <details style="margin-top:14px; opacity:.8; font-size:12.5px;">
+        <summary style="cursor:pointer;">Transkript va audio signallarni ko'rish</summary>
+        <p style="margin-top:8px; white-space:pre-wrap;"><b>Transkript:</b>\n${escapeHtml(data.transcript || '')}</p>
+        <p style="margin-top:8px; white-space:pre-wrap;"><b>Audio signallari:</b>\n${escapeHtml(data.audio_metrics_summary || '')}</p>
+      </details>
+    </div>
+  `;
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ============================================================
+// WRITING
+// ============================================================
+let allTasksInfo = {};
+let currentTaskId = '1.1';
+let currentTaskPrompt = '';
+let writingFile = null;
+
+async function loadTasksInfo(){
+  try {
+    const res = await fetch(`${API_BASE}/api/writing-tasks-info`);
+    allTasksInfo = await res.json();
+    await loadNewPrompt();
+  } catch (err) {
+    document.getElementById('writingPrompt').textContent = "Ma'lumotlarni yuklab bo'lmadi. Backend manzilini tekshiring.";
+  }
+}
+
+async function loadNewPrompt(){
+  const info = allTasksInfo[currentTaskId];
+  const promptEl = document.getElementById('writingPrompt');
+  const titleEl = document.getElementById('writingTaskTitle');
+  const regenBtn = document.getElementById('regenerateBtn');
+
+  if (info) titleEl.textContent = info.title;
+  promptEl.textContent = "⏳ Yangi mavzu tayyorlanmoqda (AI generatsiya qilmoqda)...";
+  regenBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/writing-task/${currentTaskId}`);
+    if (!res.ok) throw new Error("Server xatosi: " + res.status);
+    const data = await res.json();
+    currentTaskPrompt = data.prompt;
+    promptEl.textContent = data.prompt + `\n\n(Tavsiya etilgan hajm: ${data.word_range}, maqsad daraja: ${data.target_level})`;
+  } catch (err) {
+    promptEl.textContent = "❌ Mavzu yuklashda xatolik: " + err.message;
+    currentTaskPrompt = '';
+  } finally {
+    regenBtn.disabled = false;
+  }
+}
+
+document.getElementById('regenerateBtn').addEventListener('click', loadNewPrompt);
+
+document.querySelectorAll('#writingTasks .task-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('#writingTasks .task-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    currentTaskId = pill.dataset.task;
+    document.getElementById('writingResult').innerHTML = "";
+    document.getElementById('writingStatus').textContent = "";
+    document.getElementById('writingText').value = "";
+    loadNewPrompt();
+  });
+});
+
+document.getElementById('writingText').addEventListener('input', (e) => {
+  const words = e.target.value.trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('wordCount').textContent = words + " so'z";
+});
+
+document.getElementById('writingFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  writingFile = file;
+  document.getElementById('writingDropLabel').classList.add('has-file');
+  document.getElementById('writingDropLabel').textContent = "✅ " + file.name;
+});
+
+document.getElementById('submitWritingBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('submitWritingBtn');
+  const statusEl = document.getElementById('writingStatus');
+  const text = document.getElementById('writingText').value.trim();
+
+  if (!text && !writingFile) {
+    alert("Matn kiriting yoki fayl yuklang");
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = "Yuborilmoqda va baholanmoqda... (10-20 soniya vaqt olishi mumkin)";
+  document.getElementById('writingResult').innerHTML = "";
+
+  const formData = new FormData();
+  formData.append('task_id', currentTaskId);
+  formData.append('user_id', userId);
+  formData.append('prompt_text', currentTaskPrompt);
+  if (text) formData.append('text', text);
+  if (writingFile) formData.append('file', writingFile);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/submit-writing`, { method: 'POST', body: formData });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || ("Server xatosi: " + res.status));
+    }
+    const data = await res.json();
+    renderWritingResult(data);
+    statusEl.textContent = "";
+  } catch (err) {
+    statusEl.textContent = "❌ Xatolik: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+const ERROR_TYPE_LABELS = {
+  grammar: "Grammatika",
+  spelling: "Imlo",
+  run_on: "Gap tuzilishi",
+  register: "Uslub/registr",
+};
+
+function renderWritingResult(data){
+  const strengths = (data.strengths || []).map(s => `<div style="padding:4px 0;">✅ ${escapeHtml(s)}</div>`).join('');
+  const improvements = (data.improvements || []).map(s => `<div style="padding:4px 0;">🔧 ${escapeHtml(s)}</div>`).join('');
+  const errors = (data.errors || []).map(e => `
+    <div style="margin-top:8px; padding:10px; background:rgba(255,255,255,.06); border-radius:8px; font-size:13px;">
+      <b>${ERROR_TYPE_LABELS[e.type] || e.type}:</b>
+      <span style="text-decoration:line-through; opacity:.7;">${escapeHtml(e.original)}</span>
+      → <span style="color:var(--gold);">${escapeHtml(e.correction)}</span>
+      <div style="opacity:.75; margin-top:3px;">${escapeHtml(e.explanation)}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('writingResult').innerHTML = `
+    <div class="result">
+      <div class="level-label">${escapeHtml(data.task_title || '')}</div>
+      <div class="level">${data.score}/${data.max_score} <span style="font-size:16px;opacity:.7;">(${escapeHtml(data.estimated_cefr_level || '—')})</span></div>
+      <div class="feedback">${escapeHtml(data.comment || '')}</div>
+      <div style="margin-top:6px; font-size:12px; opacity:.7;">${escapeHtml(data.word_count_comment || '')} • ${data.word_count} so'z yozilgan</div>
+      ${strengths ? `<div style="margin-top:14px;"><b>Kuchli tomonlar:</b>${strengths}</div>` : ''}
+      ${improvements ? `<div style="margin-top:10px;"><b>Yaxshilash kerak:</b>${improvements}</div>` : ''}
+      ${errors ? `<div style="margin-top:14px;"><b>Aniq xatolar:</b>${errors}</div>` : ''}
+    </div>
+  `;
+}
+
+loadTasksInfo();
+</script>
+</body>
+</html>
