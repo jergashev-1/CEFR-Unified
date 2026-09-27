@@ -1,0 +1,17 @@
+[
+  {
+    "name": "LibriVox - The Oval Portrait",
+    "url": "https://archive.org/download/short_story_012_librivox/oval_portrait_poe_mt_64kb.mp3",
+    "level": "hard"
+  },
+  {
+    "name": "LibriVox - Evolution",
+    "url": "https://archive.org/download/short_story_012_librivox/evolution_galsworthy_ap_64kb.mp3",
+    "level": "hard"
+  },
+  {
+    "name": "LibriVox - Rollo Learning To Read",
+    "url": "https://archive.org/download/short_story_012_librivox/rollo_learning_to_read_burdette_dl_64kb.mp3",
+    "level": "medium"
+  }
+]
