@@ -53,36 +53,48 @@ tahlil emas.
 """
 
 _OUTPUT_FORMAT = """
-=== VAZIFANGIZ ===
-Nomzod javobining transkriptini rasmiy ball shkalasi bilan solishtirib
-tahlil qiling va quyidagi FORMATDA, O'ZBEK TILIDA javob bering.
+=== YOUR TASK: WRITE THE REPORT ===
+Compare the candidate's answer with the official scale above and write the report in SIMPLE, CLEAR ENGLISH. Explanations must be easy for a B1 learner to understand. Be specific and honest: every comment must be backed by evidence from the transcript. Never invent quotes. Every quotation must be copied word for word from the transcript.
 
-MUHIM: Javobingizda HECH QANDAY formatlash belgisidan foydalanmang — ya'ni
-yulduzcha (*), er kabi (#), pastki chiziq (_) belgilarini ishlatmang. Faqat
-oddiy matn yozing, quyidagi sarlavhalarni aynan shu ko'rinishda ishlating:
+FORMATTING RULES (the report is sent to Telegram as plain text):
+- Do NOT use any markdown or special formatting characters: no asterisks, no hash signs, no underscores, no backticks.
+- Use plain text only. Use a hyphen (-) for list items and one blank line between sections.
+- Use exactly the headings below, in this order.
+- Keep the whole report concise: about 350-450 words, under 3500 characters.
 
-RASMIY BALL: X/{max_score} (daraja nomi, masalan Higher A2)
-Qisqa asos (3-4 gap): nomzodning javobi rasmiy shkaladagi qaysi darajaga
-eng yaqinligini, RASMIY MEZON BANDLARIGA (grammatika, so'z boyligi,
-talaffuz, ravonlik, bog'lanish) alohida-alohida tayanib, aniq misollar
-bilan tushuntiring.
+REPORT FORMAT:
 
-Shundan so'ng, xalqaro imtihonlarda (masalan IELTS Speaking) qo'llaniladigan
-4 ta mezon bo'yicha ham alohida-alohida qisqa baho bering. Har biriga mos
-CEFR sub-darajasini (A1/A2/B1/B2/C1 va h.k.) va 1-2 gaplik izoh yozing:
+RASMIY BALL: X/{max_score} (official band name, for example Higher B1)
+CEFR level: <A1, A2, B1, B2 or C1, taken from the official band you chose>
 
-Mezonlar bo'yicha batafsil baho:
-Pronunciation (Talaffuz): [daraja] — [izoh, akustik ishonch
-signallariga asoslanib, taxminiy ekanini eslatib]
-Accuracy (Grammatik aniqlik): [daraja] — [izoh]
-Fluency (Ravonlik): [daraja] — [izoh, pauza/tezlik signallariga asoslanib]
-Lexical Resource (Leksik boylik): [daraja] — [izoh]
+Criteria (estimated from the transcript and audio signals):
+Grammar: <CEFR level> - one sentence with evidence, quoting a short phrase
+Vocabulary: <CEFR level> - one sentence with evidence
+Fluency and Coherence: <CEFR level> - one sentence about pausing, false starts, speech rate and how ideas are linked
+Pronunciation (estimated): <CEFR level> - one sentence based on the acoustic confidence signals; say clearly that this is an estimate, not a phonetic analysis
 
-Kuchli tomonlar: ...
-Rivojlantirish kerak bo'lgan tomonlar: ...
+Strengths:
+- 2-3 specific strengths, each with a short quote or a concrete detail from the answer
 
-Baholashda faqat transkriptdagi haqiqiy dalillarga tayaning, taxmin qilmang.
-Agar transkript juda qisqa yoki mavzudan tashqari bo'lsa, buni ochiq ayting.
+Weaknesses (with exact examples):
+- 2-4 specific weaknesses. For each one, show the exact words from the transcript that prove it.
+
+Grammar corrections:
+You said: "exact words from the transcript"
+Correct: "improved version"
+(give 3-5 pairs, with a blank line between pairs)
+
+RULES FOR THE CONTENT:
+1. The first line must be exactly in the form RASMIY BALL: X/{max_score} (band name), because the system reads the score from it.
+2. Weaknesses must be concrete. Look for: repeated words or phrases, ideas that contradict each other or are left unexplained, missing detail, unclear links between ideas, answers that are too short or partly off-topic. Example of the expected level of detail (do not reuse its content): The word 'mountains' appears three times in quick succession ('relaxed in the mountains... four days in the mountains'), and 'a vacation for about a week' and 'four days' slightly contradict each other without explanation.
+3. Grammar corrections: choose real errors or clearly unnatural phrases from the transcript. The corrected version must keep the speaker's meaning and sound natural. Example of the format:
+You said: "it was the last time I had a day off"
+Correct: "it was the last time I had some proper time off"
+If the answer contains fewer than 3 real problems, give fewer pairs. Do not invent errors.
+4. The transcript was produced by speech recognition. Do not comment on punctuation, capital letters or spelling.
+5. The levels given for the four criteria must agree with the official band: for example, a Higher A2 answer should not receive B2 for grammar.
+6. Judge fluency and coherence only with the features that appear in the official scale for this part (Part 1.1 has no cohesion criterion, so use pausing, false starts and reformulations only).
+7. If the transcript is empty, very short, or off-topic, say so clearly in the first lines and give the matching low score.
 """
 
 # ---------------------------------------------------------------------------
