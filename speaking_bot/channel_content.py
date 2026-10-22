@@ -3,7 +3,7 @@
 Telegram kanaliga avtomatik joylanadigan ta'lim kontenti:
   - Idiom (izoh + misollar + 4 ta test)
   - Phrasal verb (izoh + misollar + 4 ta test)
-  - Grammatika darsi (A2+/B1/B2 aylanma tartibda + 4 ta test)
+  - Fikr banki va ertalabki salomlashish
 
 Kontent har safar Groq'ning bepul til modeli orqali YANGI generatsiya
 qilinadi — cheksiz xilma-xillik uchun, oldindan yozilgan ro'yxat emas.
@@ -27,9 +27,6 @@ from morning_themes import get_random_morning_theme
 logger = logging.getLogger(__name__)
 
 client = AsyncGroq(api_key=GROQ_API_KEY)
-
-GRAMMAR_LEVELS = ["B1", "B1+", "B2"]
-
 
 def _extract_json(raw: str) -> dict:
     """Model javobidan JSON obyektini ajratib oladi, hatto model qo'shimcha
@@ -148,43 +145,6 @@ async def generate_phrasal_verb_lesson() -> dict:
     data = await _call_groq(system_prompt, user_prompt)
     data["level"] = level
     return data
-
-
-async def generate_grammar_lesson(level: str) -> dict:
-    level_note = (
-        " (B1+ — bu B1 va B2 orasidagi, B1 ni mustahkamlab, B2 ga o'tishga "
-        "tayyorlaydigan oraliq daraja, ya'ni 'yuqori B1' mavzular ekanini "
-        "hisobga oling)"
-        if level == "B1+" else ""
-    )
-    system_prompt = (
-        f"Siz ingliz tili o'qituvchisiz. Vazifangiz — CEFR {level} darajasiga "
-        f"mos{level_note}, aniq bitta grammatik mavzuni tanlab, uni "
-        "tushunarli, qisqa va aniq qilib tushuntirish (qoida + misollar), "
-        "va shu mavzu ustida 4 ta test savoli tuzish."
-        + _JSON_FORMAT_INSTRUCTION
-        + "\n\nMUHIM: \"explanation\" maydonini O'ZBEK TILIDA EMAS, balki "
-        "INGLIZ TILIDA yozing — bu grammatika qoidasi bo'lgani uchun, "
-        "o'quvchi qoidani to'g'ridan-to'g'ri ingliz tilida o'qib "
-        "tushunishi kerak. Grammatik terminlarni aniq va tushunarli, sodda "
-        "ingliz tilida ishlating (masalan darslik uslubida)."
-    )
-    user_prompt = (
-        f"CEFR {level} darajasiga mos ANIQ BITTA grammatik mavzuni tanlang "
-        f"(masalan zamon turlari, artikllar, modal fe'llar, shart gaplar, "
-        f"passiv nisbat va h.k. dan {level} darajaga mos keladiganini). "
-        "'title' maydoniga mavzu nomini INGLIZ TILIDA yozing, "
-        "masalan: \"Present Perfect vs Past Simple\"."
-    )
-    data = await _call_groq(system_prompt, user_prompt)
-    data["level"] = level
-    return data
-
-
-def get_grammar_level_for_today() -> str:
-    """Kunlar bo'yicha aylanma tartibda B1 -> B1+ -> B2 -> B1 ..."""
-    day_index = date.today().toordinal()
-    return GRAMMAR_LEVELS[day_index % len(GRAMMAR_LEVELS)]
 
 
 async def generate_morning_greeting() -> str:
