@@ -29,6 +29,7 @@ Ishga tushirish:
     python bot.py
 """
 import asyncio
+import random
 import logging
 import os
 import re
@@ -938,6 +939,20 @@ async def _record_activity_and_achievements(user_id: int, message: Message, part
     except Exception:
         logger.exception("Streak yangilashda xatolik")
 
+    # Kanalga taklif — spam bo'lib qolmasligi uchun har safar emas,
+    # tasodifiy ~30% ehtimol bilan ko'rsatiladi
+    if CHANNEL_ID:
+        if random.random() < 0.3:
+            channel_username = CHANNEL_ID.lstrip("@")
+            channel_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="📢 Kanalga qo'shilish", url=f"https://t.me/{channel_username}")
+            ]])
+            await message.answer(
+                "💡 Har kuni idiom, phrasal verb va foydali materiallar uchun "
+                "kanalimizga qo'shiling!",
+                reply_markup=channel_kb,
+            )
+
 
 @dp.message(F.text == "📈 Mening natijalarim")
 async def cmd_history(message: Message):
@@ -1081,11 +1096,12 @@ async def start_health_server():
 
 
 # ---------------------------------------------------------------------------
-# KANAL: ta'lim kontenti (idiom / phrasal verb / grammatika) avtomatik post
+# KANAL: ta'lim kontenti (idiom / phrasal verb) avtomatik post
 # ---------------------------------------------------------------------------
-async def _post_lesson_to_channel(data: dict, emoji: str, kind_label: str):
+async def _post_lesson_to_channel(data: dict, emoji: str, kind_label: str, max_quiz: int = 4):
     """Tayyor lesson ma'lumotini (title/explanation/examples/quiz) kanalga
-    joylaydi: avval tushuntirish xabari, keyin 4 ta quiz-so'rovnoma."""
+    joylaydi: avval tushuntirish xabari, keyin max_quiz tagacha
+    quiz-so'rovnoma."""
     if not CHANNEL_ID:
         logger.warning("CHANNEL_ID sozlanmagan, kanal posti o'tkazib yuborildi.")
         return
@@ -1094,7 +1110,7 @@ async def _post_lesson_to_channel(data: dict, emoji: str, kind_label: str):
     text += _channel_footer()
     await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
 
-    for q in data.get("quiz", [])[:4]:
+    for q in data.get("quiz", [])[:max_quiz]:
         options = q.get("options", [])
         if len(options) < 2:
             continue
@@ -1124,7 +1140,7 @@ def _channel_footer() -> str:
 async def post_idiom_lesson():
     try:
         data = await channel_content.generate_idiom_lesson()
-        await _post_lesson_to_channel(data, "💬", "Kunlik Idiom")
+        await _post_lesson_to_channel(data, "💬", "Kunlik Idiom", max_quiz=2)
     except Exception:
         logger.exception("Idiom postini generatsiya/yuborishda xatolik")
 
@@ -1171,18 +1187,9 @@ async def post_idea_bank():
 async def post_phrasal_verb_lesson():
     try:
         data = await channel_content.generate_phrasal_verb_lesson()
-        await _post_lesson_to_channel(data, "🔗", "Kunlik Phrasal Verb")
+        await _post_lesson_to_channel(data, "🔗", "Kunlik Phrasal Verb", max_quiz=2)
     except Exception:
         logger.exception("Phrasal verb postini generatsiya/yuborishda xatolik")
-
-
-async def post_grammar_lesson():
-    try:
-        level = channel_content.get_grammar_level_for_today()
-        data = await channel_content.generate_grammar_lesson(level)
-        await _post_lesson_to_channel(data, "📘", "Grammatika darsi")
-    except Exception:
-        logger.exception("Grammatika postini generatsiya/yuborishda xatolik")
 
 
 async def post_weekly_leaderboard():
@@ -1265,15 +1272,6 @@ async def cmd_post_phrasal(message: Message):
     await message.answer("✅ Kanalga joylandi (agar xatolik bo'lmasa).")
 
 
-@dp.message(Command("post_grammar"))
-async def cmd_post_grammar(message: Message):
-    if message.from_user.id != ADMIN_CHAT_ID:
-        return
-    await message.answer("⏳ Grammatika darsi tayyorlanmoqda...")
-    await post_grammar_lesson()
-    await message.answer("✅ Kanalga joylandi (agar xatolik bo'lmasa).")
-
-
 @dp.message(Command("post_leaderboard"))
 async def cmd_post_leaderboard(message: Message):
     if message.from_user.id != ADMIN_CHAT_ID:
@@ -1284,11 +1282,12 @@ async def cmd_post_leaderboard(message: Message):
 
 
 # --- Kunlik avtomatik rejalashtiruvchi (scheduler) ---
+# Eslatma: kuniga 3 ta post (ertalabki salom, idiom, phrasal verb).
+# Grammatika darsi va uning testlari butunlay olib tashlangan.
 TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
 _CHANNEL_SCHEDULE = [
     (7, 0, post_morning_greeting),
-    (9, 0, post_idiom_lesson),
-    (14, 0, post_grammar_lesson),
+    (12, 0, post_idiom_lesson),
     (20, 0, post_phrasal_verb_lesson),
 ]
 
