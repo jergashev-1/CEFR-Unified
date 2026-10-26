@@ -5,6 +5,8 @@ Foydalanuvchi Task 1.1 / Task 1.2 / Task 2 dan birini tanlaydi,
 matnini yuboradi, bot Claude API orqali CEFR mezonlari asosida baholaydi.
 """
 import asyncio
+import random
+import html
 import logging
 import os
 from datetime import datetime, timedelta
@@ -15,13 +17,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
-    BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LabeledPrice,
     Message,
     PreCheckoutQuery,
+    WebAppInfo,
+    FSInputFile,
 )
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -29,9 +32,8 @@ from dotenv import load_dotenv
 
 from evaluator import evaluate, generate_task_prompt
 from rubrics import TASKS, get_standard_score
+from products import PRODUCTS, build_shop_keyboard, build_admin_approval_kb, get_material_path
 import db
-import skills_practice as sp
-import sentence_practice as sent
 
 load_dotenv()
 
@@ -41,6 +43,18 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi. .env fayliga qo'shing.")
+
+# --- Sayt manzili (Telegram Mini App / Web App tugmasi uchun) ---
+# Bu yerga Netlify'dagi saytingizning manzilini yozing. ?tab=writing qismi
+# sayt ochilganda avtomatik Writing bo'limini ko'rsatadi.
+WRITING_SITE_URL = os.getenv(
+    "WRITING_SITE_URL",
+    "https://cefr-multilevel-test-speaking-writing.netlify.app/?tab=writing",
+)
+
+# --- Ta'lim kanali (Speaking botdagi @english4y kanali bilan bir xil) ---
+# Test tugagach, foydalanuvchini kanalga taklif qilish uchun ishlatiladi.
+CHANNEL_ID = os.getenv("CHANNEL_ID", "")
 
 # --- Webhook / Render sozlamalari ---
 # Render.com "Web Service" yaratganda RENDER_EXTERNAL_URL o'zgaruvchisini avtomatik
@@ -53,6 +67,13 @@ WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL") or os.getenv("RENDER_EXTERNAL_U
 WEBHOOK_PATH = "/webhook"
 USE_WEBHOOK = bool(WEBHOOK_BASE_URL)
 PORT = int(os.getenv("PORT", "10000"))
+
+# --- Do'kon: admin ID (karta orqali to'lovlarni tasdiqlash uchun) ---
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "817610690"))
+
+# Karta orqali to'lov kutilayotgan buyurtmalar: {user_id: product_id}
+# (RAMda saqlanadi; bot qayta ishga tushirilsa tozalanadi)
+pending_card_orders: dict[int, str] = {}
 
 # --- Donat sozlamalari ---
 DONATE_CARD_NUMBER = os.getenv("DONATE_CARD_NUMBER", "8600 0000 0000 0000")
@@ -69,7 +90,6 @@ dp = Dispatcher(storage=MemoryStorage())
 user_names: dict[int, str] = {}
 # Xatolikdan keyin "Qayta urinish" tugmasi uchun oxirgi yuborilgan matnni saqlaymiz:
 # {user_id: {"task_key": ..., "text": ..., "start_time": datetime|None, "time_limit": int|None}}
-user_last_submission: dict[int, dict] = {}
 
 
 def get_display_name(user) -> str:
@@ -92,77 +112,19 @@ class WritingStates(StatesGroup):
     waiting_for_text = State()
 
 
-class SkillPracticeStates(StatesGroup):
-    waiting_for_text = State()
-
-
-class SentencePracticeStates(StatesGroup):
-    waiting_for_text = State()
-
-
 def main_menu_kb() -> InlineKeyboardMarkup:
     buttons = [
+        [InlineKeyboardButton(text="🌐 Saytda test topshirish", url=WRITING_SITE_URL)],
         [InlineKeyboardButton(text=f"✍️ Task 1.1 ({TASKS['1.1']['target_level']})", callback_data="task:1.1")],
         [InlineKeyboardButton(text=f"✍️ Task 1.2 ({TASKS['1.2']['target_level']})", callback_data="task:1.2")],
         [InlineKeyboardButton(text=f"✍️ Task 2 ({TASKS['2']['target_level']})", callback_data="task:2")],
-        [InlineKeyboardButton(text="📚 Yozish mashqlari", callback_data="skills_menu")],
-        [InlineKeyboardButton(text="🔤 Gap tuzish mashqlari", callback_data="sentence_menu")],
         [InlineKeyboardButton(text="📊 Natijalarni ko'rish", callback_data="results")],
-        [InlineKeyboardButton(text="🙏 Botni qo'llab-quvvatlash", callback_data="donate_menu")],
+        [InlineKeyboardButton(text="🛒 Materiallar do'koni", callback_data="shop")],
+        [InlineKeyboardButton(text="🙏 Botni qo'llab-quvvatlash", callback_data="donate")],
         [InlineKeyboardButton(text="🔄 Qayta boshlash", callback_data="reset")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
-def skills_menu_kb() -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text=skill["title"], callback_data=f"skill:{key}")]
-        for key, skill in sp.SKILLS.items()
-    ]
-    buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def skill_level_kb(skill_key: str) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text=level, callback_data=f"skill_level:{skill_key}:{level}") for level in sp.LEVELS],
-        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="skills_menu")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def skill_result_kb(skill_key: str, level: str) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text="🔄 Yana mashq (shu ko'nikma)", callback_data=f"skill_level:{skill_key}:{level}")],
-        [InlineKeyboardButton(text="📚 Boshqa ko'nikma", callback_data="skills_menu")],
-        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_menu")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def sentence_level_kb() -> InlineKeyboardMarkup:
-    buttons = [[InlineKeyboardButton(text=level, callback_data=f"sent_level:{level}")] for level in sent.LEVELS]
-    buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def sentence_type_kb(level: str) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text=stype["title"], callback_data=f"sent_type:{level}:{key}")]
-        for key, stype in sent.SENTENCE_TYPES.items()
-    ]
-    buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="sentence_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def sentence_result_kb(level: str, sentence_type: str) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text="🔄 Yana mashq (shu tur)", callback_data=f"sent_type:{level}:{sentence_type}")],
-        [InlineKeyboardButton(text="🔤 Boshqa gap turi", callback_data=f"sent_level:{level}")],
-        [InlineKeyboardButton(text="📶 Boshqa daraja", callback_data="sentence_menu")],
-        [InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_menu")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def cancel_kb() -> InlineKeyboardMarkup:
@@ -192,7 +154,6 @@ def donate_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"⭐ {amount} Stars", callback_data=f"donate_stars:{amount}")]
         for amount in DONATE_STAR_OPTIONS
     ]
-    buttons.append([InlineKeyboardButton(text="⬅️ Bosh menyu", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -212,14 +173,23 @@ def donate_text(name: str) -> str:
 @dp.message(Command("donate"))
 async def cmd_donate(message: Message):
     name = remember_user(message.from_user)
-    await message.answer(donate_text(name), parse_mode="HTML", reply_markup=donate_kb())
+    await message.answer(
+        donate_text(name),
+        parse_mode="HTML",
+        reply_markup=donate_kb(),
+    )
 
 
-@dp.callback_query(F.data == "donate_menu")
-async def donate_menu(callback: CallbackQuery):
+@dp.callback_query(F.data == "donate")
+async def donate_button(callback: CallbackQuery):
     name = remember_user(callback.from_user)
-    await callback.message.edit_text(donate_text(name), parse_mode="HTML", reply_markup=donate_kb())
     await callback.answer()
+    await callback.message.answer(
+        donate_text(name),
+        parse_mode="HTML",
+        reply_markup=donate_kb(),
+    )
+
 
 
 @dp.callback_query(F.data.startswith("donate_stars:"))
@@ -237,6 +207,149 @@ async def donate_stars(callback: CallbackQuery):
     )
 
 
+# ---------------------------------------------------------------------------
+# DO'KON: materiallar (handout/worksheet) sotish — Telegram Stars orqali
+# ---------------------------------------------------------------------------
+@dp.callback_query(F.data == "shop")
+async def shop_open(callback: CallbackQuery):
+    remember_user(callback.from_user)
+    await callback.answer()
+    if not PRODUCTS:
+        await callback.message.answer(
+            "🛒 Hozircha do'konda mahsulot yo'q. Tez orada yangi materiallar qo'shiladi!"
+        )
+        return
+    await callback.message.answer(
+        "🛒 <b>Mavjud materiallar:</b>\nSotib olish uchun mahsulotni tanlang.",
+        parse_mode="HTML",
+        reply_markup=build_shop_keyboard(),
+    )
+
+
+@dp.callback_query(F.data == "shop_close")
+async def shop_close(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("buy:"))
+async def shop_buy(callback: CallbackQuery):
+    product_id = callback.data.split(":", 1)[1]
+    product = PRODUCTS.get(product_id)
+    if not product:
+        await callback.answer("Mahsulot topilmadi.", show_alert=True)
+        return
+    await callback.answer()
+
+    if product.get("payment_method") == "card":
+        pending_card_orders[callback.from_user.id] = product_id
+        await callback.message.answer(
+            f"🛒 <b>{product['title']}</b>\n"
+            f"Narxi: <b>{product.get('price_display', '—')}</b>\n\n"
+            f"To'lov uchun quyidagi kartaga o'tkazma qiling:\n"
+            f"💳 <code>{DONATE_CARD_NUMBER}</code>\n"
+            f"{DONATE_CARD_HOLDER}\n\n"
+            f"To'lovni amalga oshirgach, chekning (yoki ilova ekranining) "
+            f"<b>skrinshotini shu yerga rasm sifatida yuboring</b>. "
+            f"Men tekshirib, tasdiqlagach, fayl avtomatik yuboriladi.",
+            parse_mode="HTML",
+        )
+        return
+
+    await bot.send_invoice(
+        chat_id=callback.message.chat.id,
+        title=product["title"],
+        description=product["description"],
+        payload=f"buy_{product_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=product["title"], amount=product["price_stars"])],
+    )
+
+
+@dp.message(F.photo)
+async def handle_payment_proof(message: Message):
+    user_id = message.from_user.id
+    product_id = pending_card_orders.get(user_id)
+    if not product_id:
+        return  # Bu foydalanuvchidan kutilayotgan to'lov yo'q — e'tiborsiz qoldiramiz
+
+    product = PRODUCTS.get(product_id)
+    if not product:
+        pending_card_orders.pop(user_id, None)
+        await message.answer("Xatolik: mahsulot topilmadi. Iltimos, qaytadan urinib ko'ring.")
+        return
+
+    name = remember_user(message.from_user)
+    username_part = f"@{message.from_user.username}" if message.from_user.username else "(username yo'q)"
+
+    await bot.send_photo(
+        chat_id=ADMIN_CHAT_ID,
+        photo=message.photo[-1].file_id,
+        caption=(
+            f"🛒 Yangi to'lov cheki\n"
+            f"Foydalanuvchi: {name} {username_part} (ID: {user_id})\n"
+            f"Mahsulot: {product['title']}\n"
+            f"Narxi: {product.get('price_display', '—')}"
+        ),
+        reply_markup=build_admin_approval_kb(user_id, product_id),
+    )
+    await message.answer(
+        "✅ Skrinshot qabul qilindi va tekshirish uchun yuborildi. "
+        "Tasdiqlangach, fayl avtomatik yuboriladi. Iltimos kuting."
+    )
+
+
+@dp.callback_query(F.data.startswith("approve_order:"))
+async def approve_order(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_CHAT_ID:
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+
+    _, user_id_str, product_id = callback.data.split(":", 2)
+    user_id = int(user_id_str)
+    product = PRODUCTS.get(product_id)
+
+    if not product:
+        await callback.answer("Mahsulot topilmadi.", show_alert=True)
+        return
+
+    file_path = get_material_path(product["filename"])
+    if not os.path.exists(file_path):
+        await callback.answer("Fayl serverda topilmadi!", show_alert=True)
+        return
+
+    await bot.send_message(user_id, f"✅ To'lovingiz tasdiqlandi! \"{product['title']}\" fayli yuborilmoqda...")
+    await bot.send_document(user_id, FSInputFile(file_path))
+    pending_card_orders.pop(user_id, None)
+
+    await callback.answer("Tasdiqlandi va fayl yuborildi ✅")
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ TASDIQLANDI")
+
+
+@dp.callback_query(F.data.startswith("reject_order:"))
+async def reject_order(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_CHAT_ID:
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+
+    _, user_id_str, product_id = callback.data.split(":", 2)
+    user_id = int(user_id_str)
+
+    await bot.send_message(
+        user_id,
+        "❌ To'lovingiz tasdiqlanmadi. Agar bu xato deb hisoblasangiz, "
+        "administrator bilan bog'laning yoki qaytadan urinib ko'ring."
+    )
+    pending_card_orders.pop(user_id, None)
+
+    await callback.answer("Rad etildi")
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ RAD ETILDI")
+
+
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
@@ -245,10 +358,31 @@ async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: Message):
     name = remember_user(message.from_user)
+    payload = message.successful_payment.invoice_payload
     stars = message.successful_payment.total_amount
-    await message.answer(
-        f"✅ Rahmat, {name}! {stars} ⭐ Stars uchun donatingiz qabul qilindi. Sizga minnatdormiz! ❤️"
-    )
+
+    if payload.startswith("buy_"):
+        product_id = payload[len("buy_"):]
+        product = PRODUCTS.get(product_id)
+        if not product:
+            await message.answer(
+                f"✅ To'lov qabul qilindi, lekin mahsulot topilmadi. "
+                f"Iltimos, administratorga murojaat qiling (ID: {product_id})."
+            )
+            return
+        file_path = get_material_path(product["filename"])
+        if not os.path.exists(file_path):
+            await message.answer(
+                "✅ To'lovingiz qabul qilindi! Fayl hozircha serverga yuklanmagan — "
+                "tez orada yuboriladi, iltimos kuting yoki administratorga murojaat qiling."
+            )
+            return
+        await message.answer(f"✅ Rahmat, {name}! To'lovingiz ({stars} ⭐) qabul qilindi. Fayl yuborilmoqda...")
+        await bot.send_document(message.chat.id, FSInputFile(file_path))
+    else:
+        await message.answer(
+            f"✅ Rahmat, {name}! {stars} ⭐ Stars uchun donatingiz qabul qilindi. Sizga minnatdormiz! ❤️"
+        )
 
 
 @dp.message(Command("start"))
@@ -256,32 +390,17 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     name = remember_user(message.from_user)
     await message.answer(
-        main_menu_text(name),
+        f"Assalomu alaykum, {name}! 👋\n\n"
+        "Bu bot <b>Multilevel CEFR Writing</b> vazifalarini baholaydi.\n"
+        "Vazifani <b>saytda</b> (audio/fayl yuklash imkoni bilan) yoki "
+        "bevosita <b>shu yerda, botda</b> matn yuborib bajarishingiz mumkin:\n\n"
+        f"• <b>Task 1.1</b> — norasmiy email ({TASKS['1.1']['word_range']}, maqsad daraja B1)\n"
+        f"• <b>Task 1.2</b> — rasmiy email ({TASKS['1.2']['word_range']}, maqsad daraja B2)\n"
+        f"• <b>Task 2</b> — blog/forum posti ({TASKS['2']['word_range']}, maqsad daraja C1)\n\n"
+        "Botni yoqtirsangiz, /donate orqali qo'llab-quvvatlashingiz mumkin 🙏",
         reply_markup=main_menu_kb(),
         parse_mode="HTML",
     )
-
-
-def main_menu_text(name: str) -> str:
-    return (
-        f"Assalomu alaykum, {name}! 👋\n\n"
-        "Bu bot <b>Multilevel CEFR Writing</b> vazifalarini baholaydi.\n"
-        "Quyidagi vazifalardan birini tanlang va matningizni yuboring:\n\n"
-        f"• <b>Task 1.1</b> — norasmiy email ({TASKS['1.1']['word_range']}, maqsad daraja B1)\n"
-        f"• <b>Task 1.2</b> — rasmiy email ({TASKS['1.2']['word_range']}, maqsad daraja B2)\n"
-        f"• <b>Task 2</b> — blog/forum posti ({TASKS['2']['word_range']}, maqsad daraja C1)\n"
-        "• <b>📚 Yozish mashqlari</b> — Introduction, Body, Conclusion va boshqa ko'nikmalarni alohida mashq qiling\n"
-        "• <b>🔤 Gap tuzish mashqlari</b> — Simple/Compound/Complex gaplar va bog'lovchilarni B1-C1 darajasida mashq qiling\n\n"
-        "Botni yoqtirsangiz, /donate orqali qo'llab-quvvatlashingiz mumkin 🙏"
-    )
-
-
-@dp.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    name = remember_user(callback.from_user)
-    await callback.message.edit_text(main_menu_text(name), reply_markup=main_menu_kb(), parse_mode="HTML")
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("task:"))
@@ -316,7 +435,7 @@ async def choose_mode(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
     try:
-        task_prompt = await generate_task_prompt(task_key)
+        task_prompt = await generate_task_prompt(task_key, user_key=callback.from_user.id)
         word_count = len(task_prompt.split()) if task_prompt else 0
         logger.info("Generatsiya qilingan mavzu (%d so'z): %r", word_count, task_prompt)
         if not task_prompt or word_count < 15:
@@ -422,6 +541,48 @@ def format_elapsed(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+ERROR_TYPE_LABELS = {
+    "grammar": "📐 Grammatik xatolar",
+    "spelling": "🔤 Imloviy xatolar",
+    "run_on": "➰ Run-on gaplar / tinish belgilari",
+    "register": "🎭 Uslub (formal/informal) xatolari",
+}
+ERROR_TYPE_ORDER = ["grammar", "spelling", "run_on", "register"]
+
+
+def format_errors_section(errors: list) -> str:
+    """Baholash natijasidagi 'errors' ro'yxatini turkumlarga ajratib,
+    o'qish uchun qulay HTML matniga aylantiradi. Xato bo'lmasa bo'sh
+    satr qaytaradi."""
+    if not errors:
+        return ""
+    by_type: dict[str, list] = {}
+    for err in errors:
+        by_type.setdefault(err.get("type"), []).append(err)
+
+    blocks = []
+    for err_type in ERROR_TYPE_ORDER:
+        items = by_type.get(err_type)
+        if not items:
+            continue
+        lines = [f"<b>{ERROR_TYPE_LABELS[err_type]}:</b>"]
+        for e in items:
+            original = html.escape(e.get("original", ""))
+            correction = html.escape(e.get("correction", ""))
+            explanation = html.escape(e.get("explanation", ""))
+            if correction:
+                lines.append(f"  • <s>{original}</s> → <b>{correction}</b>")
+            else:
+                lines.append(f"  • {original}")
+            if explanation:
+                lines.append(f"    <i>{explanation}</i>")
+        blocks.append("\n".join(lines))
+
+    if not blocks:
+        return ""
+    return "\n\n<u>Aniqlangan xatolar:</u>\n" + "\n\n".join(blocks) + "\n"
+
+
 async def run_evaluation(chat_id: int, user_id: int, name: str, task_key: str, text: str, timed_info: dict, status_message: Message, task_prompt: str | None = None):
     """Matnni baholaydi (vaqtinchalik xatolarda 1 marta avtomatik qayta urinadi),
     natijani status_message orqali ko'rsatadi. Muvaffaqiyatsiz bo'lsa, "Qayta urinish"
@@ -439,7 +600,15 @@ async def run_evaluation(chat_id: int, user_id: int, name: str, task_key: str, t
                 await asyncio.sleep(2)
 
     if result is None:
-        user_last_submission[user_id] = {"task_key": task_key, "text": text, "task_prompt": task_prompt, **timed_info}
+        try:
+            await db.save_pending_submission(
+                user_id=user_id, task_key=task_key, text=text, task_prompt=task_prompt,
+                timed=timed_info.get("timed", False),
+                start_time=timed_info.get("start_time"),
+                time_limit=timed_info.get("time_limit"),
+            )
+        except Exception:
+            logger.exception("Pending submission'ni bazaga saqlashda xatolik")
         await status_message.edit_text(
             f"⚠️ {name}, baholashda texnik xatolik yuz berdi: {last_error}\n"
             "Bu odatda vaqtinchalik holat (server band). Quyidagi tugma orqali qayta urinib ko'ring.",
@@ -447,7 +616,10 @@ async def run_evaluation(chat_id: int, user_id: int, name: str, task_key: str, t
         )
         return
 
-    user_last_submission.pop(user_id, None)
+    try:
+        await db.delete_pending_submission(user_id)
+    except Exception:
+        logger.exception("Pending submission'ni bazadan o'chirishda xatolik")
     try:
         await db.save_result(
             user_id=user_id,
@@ -464,6 +636,7 @@ async def run_evaluation(chat_id: int, user_id: int, name: str, task_key: str, t
     task = TASKS[task_key]
     strengths = "\n".join(f"  ✅ {s}" for s in result.get("strengths", [])) or "  —"
     improvements = "\n".join(f"  🔧 {s}" for s in result.get("improvements", [])) or "  —"
+    errors_section = format_errors_section(result.get("errors", []))
 
     time_line = ""
     if timed_info.get("timed") and timed_info.get("start_time"):
@@ -473,18 +646,46 @@ async def run_evaluation(chat_id: int, user_id: int, name: str, task_key: str, t
         status = "✅ Vaqtida yakunladingiz" if elapsed <= limit_sec else f"⚠️ Vaqtdan {format_elapsed(elapsed - limit_sec)} ga oshirib yubordingiz"
         time_line = f"⏱️ Sarflangan vaqt: <b>{format_elapsed(elapsed)}</b> (chegarasi {timed_info['time_limit']} daq) — {status}\n"
 
-    text_out = (
+    header = (
         f"📝 <b>{task['title']}</b>\n"
         f"{name}, ballingiz: <b>{result['score']}/{task['max_score']}</b>\n"
         f"Taxminiy daraja: <b>{result.get('estimated_cefr_level', '—')}</b>\n"
         f"{time_line}"
         f"So'zlar soni: {result.get('word_count_comment', '—')}\n\n"
         f"<u>Kuchli tomonlari:</u>\n{strengths}\n\n"
-        f"<u>Yaxshilash kerak:</u>\n{improvements}\n\n"
-        f"💬 {result.get('comment', '')}"
+        f"<u>Yaxshilash kerak:</u>\n{improvements}\n"
     )
-    await status_message.edit_text(text_out, parse_mode="HTML")
+    footer = f"\n💬 {result.get('comment', '')}"
+
+    # Telegram xabar uzunligi chegarasi (4096) tufayli, agar xatolar bo'limi
+    # bilan birga umumiy matn juda uzun bo'lib qolsa, uni alohida xabarga
+    # ajratamiz — shunda hech qanday ma'lumot kesilib qolmaydi.
+    full_text = header + errors_section + footer
+    if len(full_text) <= 4000:
+        await status_message.edit_text(full_text, parse_mode="HTML")
+    else:
+        await status_message.edit_text(header + footer, parse_mode="HTML")
+        if errors_section:
+            for chunk_start in range(0, len(errors_section), 3800):
+                chunk = errors_section[chunk_start:chunk_start + 3800]
+                await bot.send_message(chat_id, chunk, parse_mode="HTML")
+
     await send_results(chat_id, user_id)
+
+    # Kanalga taklif — spam bo'lib qolmasligi uchun har safar emas,
+    # tasodifiy ~30% ehtimol bilan ko'rsatiladi
+    if CHANNEL_ID:
+        if random.random() < 0.3:
+            channel_username = CHANNEL_ID.lstrip("@")
+            channel_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="📢 Kanalga qo'shilish", url=f"https://t.me/{channel_username}")
+            ]])
+            await bot.send_message(
+                chat_id,
+                "💡 Har kuni idiom, phrasal verb va foydali materiallar uchun "
+                "kanalimizga qo'shiling!",
+                reply_markup=channel_kb,
+            )
 
 
 @dp.message(WritingStates.waiting_for_text, F.text)
@@ -512,7 +713,11 @@ async def receive_text(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "retry_eval")
 async def retry_eval(callback: CallbackQuery):
     name = remember_user(callback.from_user)
-    pending = user_last_submission.get(callback.from_user.id)
+    try:
+        pending = await db.get_pending_submission(callback.from_user.id)
+    except Exception:
+        logger.exception("Pending submission'ni bazadan o'qishda xatolik")
+        pending = None
     if not pending:
         await callback.answer("Qayta urinish uchun ma'lumot topilmadi, qaytadan yozing.", show_alert=True)
         return
@@ -536,267 +741,6 @@ async def receive_non_text(message: Message):
     await message.answer(f"{name}, bot faqat matn bilan ishlaydi. Iltimos, javobingizni matn shaklida yuboring.")
 
 
-# ---------------------------------------------------------------------------
-# Yozish mashqlari (Introduction, Body, Conclusion, Conciseness, Paraphrase,
-# Complex sentences) — alohida ko'nikmalarni CEFR darajasiga mos mashq qilish
-# ---------------------------------------------------------------------------
-
-@dp.callback_query(F.data == "skills_menu")
-async def skills_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    name = remember_user(callback.from_user)
-    await callback.message.edit_text(
-        f"📚 <b>{name}, yozish mashqlari</b>\n\n"
-        "Qaysi ko'nikmani mashq qilmoqchisiz? Har biri uchun avval qisqa "
-        "nazariy tushuntirish, keyin amaliy mashq beriladi.",
-        parse_mode="HTML",
-        reply_markup=skills_menu_kb(),
-    )
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("skill:"))
-async def choose_skill(callback: CallbackQuery, state: FSMContext):
-    remember_user(callback.from_user)
-    skill_key = callback.data.split(":", 1)[1]
-    skill = sp.SKILLS[skill_key]
-    await callback.message.edit_text(
-        f"{skill['title']}\n\nQaysi CEFR darajasida mashq qilmoqchisiz?",
-        reply_markup=skill_level_kb(skill_key),
-    )
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("skill_level:"))
-async def choose_skill_level(callback: CallbackQuery, state: FSMContext):
-    name = remember_user(callback.from_user)
-    _, skill_key, level = callback.data.split(":", 2)
-    skill = sp.SKILLS[skill_key]
-    theory = sp.STATIC_THEORY[skill_key]
-
-    await callback.message.edit_text(f"{theory}\n\n⏳ Mashq tayyorlanmoqda...", parse_mode="HTML")
-    await callback.answer()
-
-    try:
-        exercise = await sp.generate_exercise(skill_key, level)
-        if not exercise or len(exercise.split()) < 5:
-            exercise = None
-    except Exception:
-        logger.exception("Mashq generatsiyasida xatolik")
-        exercise = None
-
-    if not exercise:
-        await callback.message.edit_text(
-            f"{theory}\n\n⚠️ {name}, mashq generatsiya qilinmadi (server band bo'lishi mumkin). "
-            "Qaytadan urinib ko'ring.",
-            parse_mode="HTML",
-            reply_markup=skill_level_kb(skill_key),
-        )
-        return
-
-    await state.update_data(skill_key=skill_key, level=level, exercise=exercise)
-    await state.set_state(SkillPracticeStates.waiting_for_text)
-
-    await callback.message.edit_text(
-        f"{theory}\n\n"
-        f"📝 <b>Mashq ({level}):</b>\n{exercise}\n\n"
-        f"{name}, javobingizni bitta xabar tarzida yuboring.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="skills_menu")]]
-        ),
-    )
-
-
-@dp.message(SkillPracticeStates.waiting_for_text, F.text)
-async def receive_skill_text(message: Message, state: FSMContext):
-    name = remember_user(message.from_user)
-    data = await state.get_data()
-    skill_key = data.get("skill_key")
-    level = data.get("level")
-    exercise = data.get("exercise")
-    await state.clear()
-
-    if not skill_key:
-        await message.answer(f"{name}, xatolik yuz berdi, qaytadan boshlang.", reply_markup=main_menu_kb())
-        return
-
-    thinking = await message.answer(f"⏳ {name}, javobingiz tekshirilmoqda...")
-
-    result = None
-    last_error = None
-    for attempt in range(2):
-        try:
-            result = await sp.evaluate_skill_response(skill_key, level, exercise, message.text)
-            break
-        except Exception as e:
-            last_error = e
-            logger.exception("Ko'nikma baholashda xatolik (urinish %s)", attempt + 1)
-            if attempt == 0:
-                await asyncio.sleep(2)
-
-    if result is None:
-        await thinking.edit_text(
-            f"⚠️ {name}, tekshirishda texnik xatolik yuz berdi: {last_error}\nQaytadan urinib ko'ring.",
-            reply_markup=skill_level_kb(skill_key),
-        )
-        return
-
-    skill = sp.SKILLS[skill_key]
-    strengths = "\n".join(f"  ✅ {s}" for s in result.get("strengths", [])) or "  —"
-    improvements = "\n".join(f"  🔧 {s}" for s in result.get("improvements", [])) or "  —"
-    improved = result.get("improved_example", "")
-
-    text_out = (
-        f"{skill['title']} — natija\n"
-        f"{name}, ball: <b>{result['score']}/5</b>\n"
-        f"Mos daraja: <b>{result.get('level_match', '—')}</b>\n\n"
-        f"<u>Kuchli tomonlari:</u>\n{strengths}\n\n"
-        f"<u>Yaxshilash kerak:</u>\n{improvements}\n\n"
-        + (f"<u>Yaxshilangan namuna:</u>\n<i>{improved}</i>\n\n" if improved else "")
-        + f"💬 {result.get('comment', '')}"
-    )
-    await thinking.edit_text(text_out, parse_mode="HTML", reply_markup=skill_result_kb(skill_key, level))
-
-
-@dp.message(SkillPracticeStates.waiting_for_text)
-async def receive_skill_non_text(message: Message):
-    name = remember_user(message.from_user)
-    await message.answer(f"{name}, bot faqat matn bilan ishlaydi. Iltimos, javobingizni matn shaklida yuboring.")
-
-
-# ---------------------------------------------------------------------------
-# Gap tuzish mashqlari (Simple/Compound/Complex/Compound-Complex, B1-C1)
-# ---------------------------------------------------------------------------
-
-@dp.callback_query(F.data == "sentence_menu")
-async def sentence_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    name = remember_user(callback.from_user)
-    await callback.message.edit_text(
-        f"🔤 <b>{name}, gap tuzish mashqlari</b>\n\n"
-        "Qaysi CEFR darajasida mashq qilmoqchisiz? Har bir darajada mos "
-        "bog'lovchilar bilan Simple, Compound, Complex va Compound-Complex "
-        "gaplarni mashq qilasiz.",
-        parse_mode="HTML",
-        reply_markup=sentence_level_kb(),
-    )
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("sent_level:"))
-async def choose_sentence_level(callback: CallbackQuery, state: FSMContext):
-    remember_user(callback.from_user)
-    level = callback.data.split(":", 1)[1]
-    await callback.message.edit_text(
-        f"Daraja: <b>{level}</b>\n\nQaysi gap turini mashq qilmoqchisiz?",
-        parse_mode="HTML",
-        reply_markup=sentence_type_kb(level),
-    )
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("sent_type:"))
-async def choose_sentence_type(callback: CallbackQuery, state: FSMContext):
-    name = remember_user(callback.from_user)
-    _, level, sentence_type = callback.data.split(":", 2)
-    stype = sent.SENTENCE_TYPES[sentence_type]
-    theory = sent.STATIC_THEORY[sentence_type]
-    connectors = sent.connectors_line(level)
-
-    await callback.message.edit_text(f"{theory}\n\n{connectors}\n\n⏳ Mashq tayyorlanmoqda...", parse_mode="HTML")
-    await callback.answer()
-
-    try:
-        exercise = await sent.generate_sentence_exercise(level, sentence_type)
-        if not exercise or len(exercise.split()) < 3:
-            exercise = None
-    except Exception:
-        logger.exception("Gap mashqi generatsiyasida xatolik")
-        exercise = None
-
-    if not exercise:
-        await callback.message.edit_text(
-            f"{theory}\n\n{connectors}\n\n⚠️ {name}, mashq generatsiya qilinmadi (server band bo'lishi mumkin). "
-            "Qaytadan urinib ko'ring.",
-            parse_mode="HTML",
-            reply_markup=sentence_type_kb(level),
-        )
-        return
-
-    await state.update_data(level=level, sentence_type=sentence_type, exercise=exercise)
-    await state.set_state(SentencePracticeStates.waiting_for_text)
-
-    await callback.message.edit_text(
-        f"{theory}\n\n{connectors}\n\n"
-        f"📝 <b>Mashq — {stype['title']} ({level}):</b>\n{exercise}\n\n"
-        f"{name}, javobingizni bitta xabar tarzida yuboring.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="sentence_menu")]]
-        ),
-    )
-
-
-@dp.message(SentencePracticeStates.waiting_for_text, F.text)
-async def receive_sentence_text(message: Message, state: FSMContext):
-    name = remember_user(message.from_user)
-    data = await state.get_data()
-    level = data.get("level")
-    sentence_type = data.get("sentence_type")
-    exercise = data.get("exercise")
-    await state.clear()
-
-    if not level:
-        await message.answer(f"{name}, xatolik yuz berdi, qaytadan boshlang.", reply_markup=main_menu_kb())
-        return
-
-    thinking = await message.answer(f"⏳ {name}, javobingiz tekshirilmoqda...")
-
-    result = None
-    last_error = None
-    for attempt in range(2):
-        try:
-            result = await sent.evaluate_sentence_response(level, sentence_type, exercise, message.text)
-            break
-        except Exception as e:
-            last_error = e
-            logger.exception("Gap baholashda xatolik (urinish %s)", attempt + 1)
-            if attempt == 0:
-                await asyncio.sleep(2)
-
-    if result is None:
-        await thinking.edit_text(
-            f"⚠️ {name}, tekshirishda texnik xatolik yuz berdi: {last_error}\nQaytadan urinib ko'ring.",
-            reply_markup=sentence_type_kb(level),
-        )
-        return
-
-    stype = sent.SENTENCE_TYPES[sentence_type]
-    correct_mark = "✅ To'g'ri gap turi" if result.get("is_correct_type") else f"❌ Bu {result.get('detected_type', 'boshqa')} gap, so'ralgan tur emas"
-    connectors_used = ", ".join(result.get("connectors_used", [])) or "—"
-    errors = "\n".join(f"  🔧 {e}" for e in result.get("grammar_errors", [])) or "  — (xato topilmadi)"
-    corrected = result.get("corrected_version", "")
-
-    text_out = (
-        f"{stype['title']} — natija ({level})\n"
-        f"{name}, ball: <b>{result['score']}/5</b>\n"
-        f"{correct_mark}\n"
-        f"Ishlatilgan bog'lovchi(lar): <i>{connectors_used}</i>\n"
-        f"💡 {result.get('connector_feedback', '')}\n\n"
-        f"<u>Xatolar va tushuntirish:</u>\n{errors}\n\n"
-        + (f"<u>To'g'irlangan versiya:</u>\n<i>{corrected}</i>\n\n" if corrected else "")
-        + f"💬 {result.get('comment', '')}"
-    )
-    await thinking.edit_text(text_out, parse_mode="HTML", reply_markup=sentence_result_kb(level, sentence_type))
-
-
-@dp.message(SentencePracticeStates.waiting_for_text)
-async def receive_sentence_non_text(message: Message):
-    name = remember_user(message.from_user)
-    await message.answer(f"{name}, bot faqat matn bilan ishlaydi. Iltimos, javobingizni matn shaklida yuboring.")
-
-
 @dp.message()
 async def fallback(message: Message):
     name = remember_user(message.from_user)
@@ -806,12 +750,6 @@ async def fallback(message: Message):
 async def main():
     await db.init_db()
     logger.info("Baza tayyor")
-
-    await bot.set_my_commands([
-        BotCommand(command="start", description="🏠 Bosh menyu"),
-        BotCommand(command="donate", description="🙏 Botni qo'llab-quvvatlash"),
-    ])
-    logger.info("Bot buyruqlari (Menu) o'rnatildi")
 
     if USE_WEBHOOK:
         # --- Render.com uchun: webhook rejimi ---
