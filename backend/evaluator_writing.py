@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import re
+import time
 
 from rubrics import TASKS
 
@@ -244,19 +245,19 @@ commentary or explanation, and do not translate or add anything in any
 other language."""
 
 
-def _email_prompt_instruction(task_key: str, task: dict) -> str:
-    role = "a FRIEND, in an informal, friendly style" if task_key == "1.1" else "a STRANGER/OFFICIAL person (e.g. an organisation manager), in a formal style"
-    return f"""Follow the EXAMPLE below closely in structure and style, but
-write a COMPLETELY DIFFERENT, ORIGINAL topic/situation. Write the whole
-task ENTIRELY IN ENGLISH.
+def _letter_email_instruction() -> str:
+    """Task 1.1 va 1.2 uchun UMUMIY email xabarni generatsiya qilish ko'rsatmasi.
+    Haqiqiy imtihonda ikkala xatga ham bir xil email keladi; faqat xat yozish
+    ko'rsatmasi (norasmiy / rasmiy) farq qiladi."""
+    return """Follow the EXAMPLE below closely in structure and style, but write a
+COMPLETELY DIFFERENT, ORIGINAL situation. Write ENTIRELY IN ENGLISH.
 
 EXAMPLE:
 ---
 Hello,
 
-Our city library has introduced a new online membership system. Some of
-our members have been having trouble logging in. We would like to ask
-you to:
+Our city library has introduced a new online membership system. Some of our
+members have been having trouble logging in. We would like to ask you to:
 1. Describe how you registered on the new system.
 2. Describe any problems you encountered.
 3. Suggest how the system could be improved.
@@ -265,51 +266,57 @@ Best regards,
 The City Library Team
 ---
 
-Write a letter to your friend about your feelings and experience with this
-system.
----
-
-NOW, following the same pattern, write your own original English text
-about a DIFFERENT organisation and DIFFERENT situation (choose from, e.g.,
-a sports club, an online course, a local cafe, a mobile app, an employer,
-etc. — DO NOT reuse the library/registration topic). Make sure there are
-exactly 3 clear numbered points. At the end, give the candidate an
-instruction that they must write a letter to {role}, and must address all
-3 points. Recommended length: {task['word_range']}.
-
-Write ONLY the final English text (the message from the organisation +
-instruction), with no extra commentary, heading, or the word "EXAMPLE"."""
+NOW write your own original message of the same kind from a DIFFERENT
+organisation about a DIFFERENT situation (for example a sports club, an online
+course, a local cafe, a mobile app or an employer; do NOT reuse the library
+topic). Rules:
+- A short greeting, two short sentences that describe the situation, exactly 3
+  clearly numbered points the reader is asked to write about, and a short
+  sign-off with the organisation's name.
+- The whole message must be under 75 words.
+- Write ONLY the message itself. Do NOT add any instruction about writing a
+  letter, no heading, no commentary, and not the word EXAMPLE."""
 
 
-def _essay_prompt_instruction(task: dict) -> str:
-    return f"""Follow the EXAMPLE below in style, but write a COMPLETELY
-DIFFERENT, ORIGINAL topic. Write the whole task ENTIRELY IN ENGLISH.
+# Ikkala xatga BIR XIL email keladi, farqi faqat shu ko'rsatmada:
+# 1.1 - norasmiy (do'stga), 1.2 - rasmiy (menejerga).
+_LETTER_TASK_INSTRUCTIONS = {
+    "1.1": "Write an informal letter to your friend about your experience and feelings. Address all 3 points. Write about 50 words.",
+    "1.2": "Write a formal letter to the manager of the organisation. Address all 3 points. Write 120-150 words.",
+}
+
+
+def _essay_prompt_instruction() -> str:
+    """Task 2 uchun QISQA shart (Multilevel formati): kontekst + savol +
+    standart yakuniy ko'rsatma."""
+    return """Write ONE short writing task in the style of the EXAMPLE below.
+Write ENTIRELY IN ENGLISH.
 
 EXAMPLE:
 ---
-Many people can no longer imagine life without social media. Do you think
-social media brings more benefit or harm to our lives? Give your opinion
-and support it with examples. Write your blog post.
+Many people can no longer imagine life without social media. Do you think social media brings more benefit or harm to our lives? Give your opinion and support it with examples. Write your blog post.
 ---
 
-NOW, in the same style, write your own original English topic on a
-DIFFERENT subject (choose from, e.g., technology, health, education,
-travel, work life, the environment, society, etc. — DO NOT reuse the
-social media topic). Write 2-3 sentences: a situation/question, plus an
-instruction such as "give your opinion and support it with examples."
-Recommended length: {task['word_range']}.
+NOW write your own original task on a DIFFERENT, everyday subject (for example
+technology, health, education, travel, work, the environment, family or
+society; do NOT reuse social media). Rules:
+- 3 or 4 short sentences: one sentence that sets the context, one question that
+  asks for an opinion, then the closing instruction "Give your opinion and
+  support it with examples." followed by "Write your blog post." (you may say
+  "article" or "forum post" instead of "blog post").
+- The whole task must be between 30 and 45 words. NEVER write more than 45 words.
+- Write ONLY the task text, with no heading, no commentary, and not the word
+  EXAMPLE."""
 
-Write ONLY the final English topic text, with no extra commentary,
-heading, or the word "EXAMPLE"."""
 
-
-def _build_prompt_gen_instruction(task_key: str) -> str:
-    task = TASKS[task_key]
-    if task_key in ("1.1", "1.2"):
-        body = _email_prompt_instruction(task_key, task)
-    else:
-        body = _essay_prompt_instruction(task)
-    return f"{body}\n\nTarget level: {task['target_level']}."
+def _clean_letter_email(text: str) -> str:
+    """Model ba'zan '---' chiziqlari yoki oxiriga xat yozish ko'rsatmasini
+    qo'shib yuboradi - ularni olib tashlaydi (ko'rsatma alohida qo'shiladi)."""
+    lines = [ln for ln in text.strip().splitlines() if ln.strip() != "---"]
+    paragraphs = "\n".join(lines).strip().split("\n\n")
+    while len(paragraphs) > 1 and paragraphs[-1].strip().lower().startswith(("write ", "task")):
+        paragraphs.pop()
+    return "\n\n".join(p.strip() for p in paragraphs).strip()
 
 
 def _call_gemini_plain_sync(instruction: str) -> str:
@@ -346,10 +353,97 @@ async def _generate_anthropic_prompt(instruction: str) -> str:
     )
 
 
-async def generate_task_prompt(task_key: str) -> str:
-    instruction = _build_prompt_gen_instruction(task_key)
+async def _generate_text(instruction: str) -> str:
     if LLM_PROVIDER == "anthropic":
         text = await _generate_anthropic_prompt(instruction)
     else:
         text = await _generate_gemini_prompt(instruction)
-    return text.strip()
+    return (text or "").strip()
+
+
+async def _generate_with_length_guard(
+    instruction: str, min_words: int, max_words: int, target_words: int,
+    cleaner=None, attempts: int = 3,
+) -> str:
+    """Matnni generatsiya qiladi; juda uzun/qisqa chiqsa, qayta so'raydi (eng
+    ko'pi bilan `attempts` marta). Hammasi me'yordan chiqsa, maqsadli so'z
+    soniga eng yaqinini qaytaradi."""
+    candidates = []
+    for _ in range(attempts):
+        text = await _generate_text(instruction)
+        if cleaner:
+            text = cleaner(text)
+        n = len(text.split())
+        if min_words <= n <= max_words:
+            return text
+        if n:
+            candidates.append((abs(n - target_words), text))
+    return min(candidates)[1] if candidates else ""
+
+
+# ---------------------------------------------------------------------------
+# Task 1.1 va 1.2 uchun umumiy email: foydalanuvchi bo'yicha juftlash
+# ---------------------------------------------------------------------------
+# Qoida: foydalanuvchi uchun yaratilgan email avval bir vazifada (masalan 1.1),
+# keyin ikkinchisida (1.2) ham ko'rsatiladi. Agar shu vazifa shu email bilan
+# allaqachon ishlatilgan bo'lsa (yoki "yangi mavzu" so'ralsa), YANGI email
+# yaratiladi. Tartib teskari bo'lsa (avval 1.2, keyin 1.1) ham xuddi shunday.
+_LETTER_CACHE: dict = {}
+_LETTER_CACHE_TTL = 6 * 3600  # soniya
+_LETTER_CACHE_MAX = 1000
+
+
+def _prune_letter_cache(now: float):
+    if len(_LETTER_CACHE) < _LETTER_CACHE_MAX:
+        return
+    for key in [k for k, v in _LETTER_CACHE.items() if now - v["ts"] > _LETTER_CACHE_TTL]:
+        _LETTER_CACHE.pop(key, None)
+    if len(_LETTER_CACHE) >= _LETTER_CACHE_MAX:
+        oldest = sorted(_LETTER_CACHE.items(), key=lambda kv: kv[1]["ts"])
+        for key, _ in oldest[: _LETTER_CACHE_MAX // 2]:
+            _LETTER_CACHE.pop(key, None)
+
+
+async def _get_letter_email(task_key: str, user_key, force_new: bool) -> str:
+    now = time.time()
+    entry = _LETTER_CACHE.get(user_key) if user_key is not None else None
+    if (
+        entry
+        and not force_new
+        and task_key not in entry["used"]
+        and now - entry["ts"] < _LETTER_CACHE_TTL
+    ):
+        entry["used"].add(task_key)
+        return entry["email"]
+
+    email = await _generate_with_length_guard(
+        _letter_email_instruction(), min_words=30, max_words=90, target_words=65,
+        cleaner=_clean_letter_email,
+    )
+    if email and user_key is not None:
+        _prune_letter_cache(now)
+        _LETTER_CACHE[user_key] = {"email": email, "used": {task_key}, "ts": now}
+    return email
+
+
+async def generate_task_prompt(task_key: str, user_key=None, force_new: bool = False) -> str:
+    """Berilgan vazifa uchun topshiriq matnini qaytaradi.
+
+    - Task 1.1 / 1.2: BIR XIL email xabar + vazifaga mos ko'rsatma (norasmiy /
+      rasmiy). `user_key` berilsa, email shu foydalanuvchi uchun juftlanadi.
+    - Task 2: qisqa (30-45 so'z) Multilevel formatidagi shart.
+    `force_new=True` bo'lsa, juftlanishdan qat'i nazar yangi email yaratiladi.
+    """
+    if task_key in _LETTER_TASK_INSTRUCTIONS:
+        key = str(user_key) if user_key is not None else None
+        email = await _get_letter_email(task_key, key, force_new)
+        if not email:
+            raise RuntimeError("Email xabar generatsiya qilinmadi (bo'sh javob)")
+        return f"{email}\n\n{_LETTER_TASK_INSTRUCTIONS[task_key]}"
+
+    text = await _generate_with_length_guard(
+        _essay_prompt_instruction(), min_words=15, max_words=55, target_words=40,
+    )
+    if not text:
+        raise RuntimeError("Mavzu generatsiya qilinmadi (bo'sh javob)")
+    return text
