@@ -37,14 +37,28 @@ Qoidalar:
   Har bir xato aniq TURKUMLARDAN BIRIGA tegishli bo'lishi shart:
     "grammar"   — grammatik xato (zamon, kelishik, artikl, so'z tartibi va h.k.)
     "spelling"  — imloviy xato (noto'g'ri yozilgan so'z)
-    "run_on"    — run-on gap yoki noto'g'ri tinish belgilari
+    "run_on"    — run-on gap (bog'lovchisiz yoki noto'g'ri bo'laklangan juda
+                  uzun gap) yoki gap ma'nosini buzadigan tinish belgisi (masalan
+                  vergul o'rniga nuqta). Bo'sh joy (space) masalalari bunga KIRMAYDI
     "register"  — uslub/registr xatosi
   Har bir xato uchun:
     "original"    — nomzod matnidan XATOLIK BO'LGAN ANIQ QISM
     "correction"  — to'g'irlangan varianti
     "explanation" — nima uchun xato ekanligi haqida 1 qisqa gap, o'zbek tilida
-  Agar biror turkumda xato topilmasa, shu turkum uchun element qo'shmang
-  (kamida 3-8 ta eng muhim xatoni ko'rsating).
+  Agar biror turkumda xato topilmasa, shu turkum uchun element qo'shmang.
+- "errors" ro'yxati 0 dan 8 tagacha HAQIQIY xatodan iborat bo'lishi mumkin.
+  Matn deyarli toza bo'lsa, ro'yxat qisqa yoki hatto bo'sh ([]) bo'lsin —
+  ro'yxatni to'ldirish uchun xato O'YLAB TOPMANG. Faqat qoidaga zid yoki
+  aniq noto'g'ri/noo'rin qo'llanishni xato deb yozing; "yanada yaxshiroq
+  variant" yoki uslubiy taklifni xato deb yozmang (bunday takliflarni
+  "improvements" ga qo'shing).
+- MUHIM — FORMATLASH XATOLARI BAHOLANMAYDI: matn kiritilganda abzats va
+  qator uzilishlari yo'qolgan bo'lishi mumkin, shuning uchun tinish belgisidan
+  keyin bo'sh joy (space) yo'qligi (masalan "centre.I visited", "Hi Tom,I
+  booked") yoki abzatslar ajratilmaganligi o'quvchining xatosi EMAS. Bunday
+  narsalarni "errors" ga, "improvements" ga ham, "comment" ga ham
+  YOZMANG. Faqat so'z, grammatika, imlo va ma'noga ta'sir qiluvchi tinish
+  belgilari baholanadi.
 - Javobingizni albatta FAQAT quyidagi JSON formatida bering, boshqa hech
   qanday matn qo'shmang:
 
@@ -220,6 +234,10 @@ def _sanitize_errors(errors) -> list:
         correction = str(item.get("correction", "")).strip()
         explanation = str(item.get("explanation", "")).strip()
         if not original:
+            continue
+        # Faqat bo'sh joy (probel/qator uzilishi) bilan farq qiladigan "xato" -
+        # bu abzats uzilishi artefakti, haqiqiy xato emas: tashlab yuboramiz.
+        if correction and re.sub(r"\s+", "", original) == re.sub(r"\s+", "", correction):
             continue
         cleaned.append({
             "type": err_type,
