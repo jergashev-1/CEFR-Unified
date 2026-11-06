@@ -6,11 +6,14 @@ Standart: Google Gemini (bepul). Ixtiyoriy: Anthropic Claude.
 """
 import asyncio
 import json
+import logging
 import os
 import re
 import time
 
 from rubrics import TASKS
+
+logger = logging.getLogger(__name__)
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
 
@@ -422,9 +425,104 @@ def _prune_letter_cache(now: float):
             _LETTER_CACHE.pop(key, None)
 
 
+# ---------------------------------------------------------------------------
+# Juftlashni qayta ishga tushishdan himoya qilish (Postgres/Supabase)
+# ---------------------------------------------------------------------------
+# Juftlash ma'lumoti xotirada VA bazada saqlanadi. Server qayta ishga
+# tushsa (masalan deploy paytida), xotira tozalanadi, lekin baza saqlanib
+# qoladi - shuning uchun 1.1 va 1.2 baribir bir xil email oladi. Baza
+# ishlamasa yoki DATABASE_URL yo'q bo'lsa, tizim faqat xotira bilan ishlayveradi.
+_DB_POOL = None
+_DB_RETRY_AFTER = 0.0
+
+
+async def _letter_db():
+    global _DB_POOL, _DB_RETRY_AFTER
+    if _DB_POOL is not None:
+        return _DB_POOL
+    url = os.getenv("DATABASE_URL")
+    if not url or time.time() < _DB_RETRY_AFTER:
+        return None
+    try:
+        import asyncpg
+
+        # statement_cache_size=0 - Supabase "Transaction pooler" uchun zarur
+        pool = await asyncpg.create_pool(
+            url, min_size=1, max_size=2, statement_cache_size=0,
+            timeout=8, command_timeout=8,
+        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS letter_pairs (
+                    user_key TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    used TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        _DB_POOL = pool
+        return pool
+    except Exception as e:
+        logger.warning("letter_pairs bazasiga ulanib bo'lmadi, faqat xotira ishlatiladi: %s", e)
+        _DB_RETRY_AFTER = time.time() + 120
+        return None
+
+
+async def _db_load_pair(user_key: str):
+    pool = await _letter_db()
+    if pool is None:
+        return None
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT email, used, EXTRACT(EPOCH FROM created_at) AS ts "
+                "FROM letter_pairs WHERE user_key = $1",
+                user_key,
+            )
+    except Exception as e:
+        logger.warning("letter_pairs o'qishda xatolik: %s", e)
+        return None
+    if not row:
+        return None
+    return {
+        "email": row["email"],
+        "used": {u for u in row["used"].split(",") if u},
+        "ts": float(row["ts"]),
+    }
+
+
+async def _db_save_pair(user_key: str, entry: dict):
+    pool = await _letter_db()
+    if pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO letter_pairs (user_key, email, used, created_at)
+                VALUES ($1, $2, $3, to_timestamp($4::double precision))
+                ON CONFLICT (user_key) DO UPDATE
+                SET email = EXCLUDED.email, used = EXCLUDED.used,
+                    created_at = EXCLUDED.created_at
+                """,
+                user_key, entry["email"], ",".join(sorted(entry["used"])), entry["ts"],
+            )
+    except Exception as e:
+        logger.warning("letter_pairs yozishda xatolik: %s", e)
+
+
 async def _get_letter_email(task_key: str, user_key, force_new: bool) -> str:
     now = time.time()
-    entry = _LETTER_CACHE.get(user_key) if user_key is not None else None
+    entry = None
+    if user_key is not None:
+        entry = _LETTER_CACHE.get(user_key)
+        if entry is None and not force_new:
+            entry = await _db_load_pair(user_key)  # qayta ishga tushgan bo'lsa, bazadan tiklaymiz
+            if entry:
+                _LETTER_CACHE[user_key] = entry
+
     if (
         entry
         and not force_new
@@ -432,6 +530,7 @@ async def _get_letter_email(task_key: str, user_key, force_new: bool) -> str:
         and now - entry["ts"] < _LETTER_CACHE_TTL
     ):
         entry["used"].add(task_key)
+        await _db_save_pair(user_key, entry)
         return entry["email"]
 
     email = await _generate_with_length_guard(
@@ -440,7 +539,9 @@ async def _get_letter_email(task_key: str, user_key, force_new: bool) -> str:
     )
     if email and user_key is not None:
         _prune_letter_cache(now)
-        _LETTER_CACHE[user_key] = {"email": email, "used": {task_key}, "ts": now}
+        entry = {"email": email, "used": {task_key}, "ts": now}
+        _LETTER_CACHE[user_key] = entry
+        await _db_save_pair(user_key, entry)
     return email
 
 
