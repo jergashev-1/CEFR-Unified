@@ -75,12 +75,12 @@ async def writing_tasks_info():
 # WRITING: yangi, original mavzu generatsiya qilish (botdagidek, har safar yangi)
 # ---------------------------------------------------------------------------
 @app.get("/api/writing-task/{task_key}")
-async def get_writing_task(task_key: str):
+async def get_writing_task(task_key: str, user_id: str | None = None, new: int = 0):
     if task_key not in WRITING_TASKS:
         raise HTTPException(status_code=400, detail="Noto'g'ri task_key")
 
     try:
-        prompt_text = await generate_task_prompt(task_key)
+        prompt_text = await generate_task_prompt(task_key, user_key=user_id, force_new=bool(new))
     except Exception as e:
         logger.exception("Writing task generatsiyasida xatolik")
         raise HTTPException(status_code=502, detail=f"Mavzu generatsiya qilishda xatolik: {e}")
